@@ -29,7 +29,7 @@ const DEMO_ACCOUNTS = [
 ]
 
 function getSessionName() {
-  return `atlas-session-${getAppConfig().environment.toLowerCase()}`
+  return `void-session-${getAppConfig().environment.toLowerCase()}`
 }
 
 function canUseDevelopmentSecret() {

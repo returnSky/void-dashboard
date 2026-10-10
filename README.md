@@ -93,7 +93,7 @@ SESSION_SECRET=replace-with-a-random-secret-of-at-least-32-characters
 
 Serve UAT/PROD login over HTTPS. Cookies used by built server artifacts and UAT/PROD servers have `Secure`, `HttpOnly`, and `SameSite=Lax` attributes and expire after 8 hours. Production applications should use a real identity service instead of the public demo accounts.
 
-Session cookies are named `atlas-session-dev`, `atlas-session-uat`, and `atlas-session-prod`. Demo data storage keys also include an environment suffix to prevent environments on the same domain from overwriting one another. The theme is a display preference shared on the current device. Authentication pages and session requests use `Cache-Control: private, no-store`.
+Session cookies are named `void-session-dev`, `void-session-uat`, and `void-session-prod`. Demo data storage keys also include an environment suffix to prevent environments on the same domain from overwriting one another. The theme is a display preference shared on the current device. Authentication pages and session requests use `Cache-Control: private, no-store`.
 
 ## Project structure and extension points
 

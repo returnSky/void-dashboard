@@ -70,11 +70,11 @@ export default function ThemeToggle({
       setMode(next)
       applyMode(next)
     }
-    window.addEventListener('atlas-theme-change', onThemeChange)
+    window.addEventListener('void-theme-change', onThemeChange)
     window.addEventListener('storage', onStorage)
     return () => {
       window.removeEventListener('storage', onStorage)
-      window.removeEventListener('atlas-theme-change', onThemeChange)
+      window.removeEventListener('void-theme-change', onThemeChange)
     }
   }, [])
 
@@ -119,9 +119,7 @@ export default function ThemeToggle({
     } catch {
       fallbackMode = next
     }
-    window.dispatchEvent(
-      new CustomEvent('atlas-theme-change', { detail: next }),
-    )
+    window.dispatchEvent(new CustomEvent('void-theme-change', { detail: next }))
     closeMenu()
   }
 
