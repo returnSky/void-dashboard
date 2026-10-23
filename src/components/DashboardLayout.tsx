@@ -27,6 +27,7 @@ import { useDashboard } from './DashboardProvider'
 import { useToast } from './ToastProvider'
 import ThemeToggle from './ThemeToggle'
 import BrandMark from './BrandMark'
+import Dialog from './Dialog'
 import { getAppConfig } from '../config/env'
 
 const navigation = [
@@ -39,7 +40,7 @@ const navigation = [
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { user } = dashboardRoute.useRouteContext()
   const appConfig = getAppConfig()
-  const { settings } = useDashboard()
+  const { settings, hasUnsavedSettings } = useDashboard()
   const { toast } = useToast()
   const router = useRouter()
   const navigate = useNavigate()
@@ -51,6 +52,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [loggingOut, setLoggingOut] = useState(false)
+  const [confirmLogout, setConfirmLogout] = useState(false)
   const [unread, setUnread] = useState(true)
   const mobileDialog = useRef<HTMLDialogElement>(null)
   const page = navigation.find((item) => item.to === pathname) ?? navigation[0]
@@ -70,13 +72,24 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     setLoggingOut(true)
     try {
       await logoutFn()
+      await navigate({
+        to: '/login',
+        search: { redirect: '/' },
+        replace: true,
+        ignoreBlocker: true,
+      })
       await router.invalidate()
-      await navigate({ to: '/login', search: { redirect: '/' } })
     } catch {
       toast('退出失败，请重试。', 'error')
     } finally {
       setLoggingOut(false)
     }
+  }
+
+  function requestSignOut() {
+    if (loggingOut) return
+    if (hasUnsavedSettings) setConfirmLogout(true)
+    else void signOut()
   }
 
   function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
@@ -164,7 +177,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               title="退出登录"
               aria-label="退出登录"
               disabled={loggingOut}
-              onClick={() => void signOut()}
+              onClick={requestSignOut}
             >
               <LogOut size={17} aria-hidden="true" />
             </button>
@@ -307,7 +320,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               className="icon-button"
               aria-label="退出登录"
               disabled={loggingOut}
-              onClick={() => void signOut()}
+              onClick={requestSignOut}
             >
               <LogOut size={17} aria-hidden="true" />
             </button>
@@ -333,6 +346,34 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </Link>
         </footer>
       </div>
+      <Dialog
+        open={confirmLogout}
+        onClose={() => setConfirmLogout(false)}
+        title="放弃修改并退出登录？"
+        description="工作区设置还有未保存的修改。退出将放弃本页草稿，已保存的数据不受影响。"
+      >
+        <div className="flex flex-wrap justify-end gap-3">
+          <button
+            type="button"
+            className="button button-secondary"
+            data-dialog-autofocus
+            onClick={() => setConfirmLogout(false)}
+          >
+            继续编辑
+          </button>
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={loggingOut}
+            onClick={() => {
+              setConfirmLogout(false)
+              void signOut()
+            }}
+          >
+            放弃修改并退出
+          </button>
+        </div>
+      </Dialog>
     </div>
   )
 }

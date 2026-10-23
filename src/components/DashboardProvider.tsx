@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useToast } from './ToastProvider'
 import { getAppConfig } from '../config/env'
+import { parseDashboardBackup } from '../data/dashboard-backup'
 import {
   DEMO_STORAGE_KEY,
   MAX_DEMO_USERS,
@@ -16,6 +17,7 @@ import type {
   DemoRole,
   DemoUser,
   DemoUserInput,
+  DemoUserStatus,
   WorkspaceSettings,
 } from '../data/dashboard'
 
@@ -36,10 +38,14 @@ type DashboardContextValue = {
   users: Array<DemoUser>
   settings: WorkspaceSettings
   hydrated: boolean
+  hasUnsavedSettings: boolean
+  setHasUnsavedSettings: (value: boolean) => void
   addUser: (input: DemoUserInput) => MutationResult
   updateUser: (id: string, input: DemoUserInput) => MutationResult
+  updateUserStatus: (id: string, status: DemoUserStatus) => MutationResult
   updateSettings: (input: Partial<WorkspaceSettings>) => MutationResult
-  resetDemo: () => void
+  restoreDemo: (raw: string) => MutationResult
+  resetDemo: () => MutationResult
 }
 
 const DashboardContext = createContext<DashboardContextValue | null>(null)
@@ -55,6 +61,7 @@ export function DashboardProvider({
     createDefaultSnapshot,
   )
   const [hydrated, setHydrated] = useState(false)
+  const [hasUnsavedSettings, setHasUnsavedSettings] = useState(false)
   const current = useRef(snapshot)
   const didRead = useRef(false)
   const ready = useRef(false)
@@ -172,6 +179,31 @@ export function DashboardProvider({
     )
   }
 
+  function updateUserStatus(
+    id: string,
+    status: DemoUserStatus,
+  ): MutationResult {
+    const waiting = checkReady()
+    if (waiting) return waiting
+    const member = current.current.users.find((user) => user.id === id)
+    if (!member) {
+      return { success: false, error: '成员不存在，请刷新列表后重试。' }
+    }
+    const checked = validateUserInput(
+      { ...member, status },
+      current.current.users,
+      id,
+    )
+    if (!checked.success) return checked
+    const users = current.current.users.map((user) =>
+      user.id === id ? { ...user, status: checked.data.status } : user,
+    )
+    return commit(
+      { ...current.current, users },
+      `已更新成员 ${member.name} 的状态。`,
+    )
+  }
+
   function updateSettings(input: Partial<WorkspaceSettings>): MutationResult {
     const waiting = checkReady()
     if (waiting) return waiting
@@ -183,13 +215,21 @@ export function DashboardProvider({
     )
   }
 
-  function resetDemo() {
+  function restoreDemo(raw: string): MutationResult {
+    const denied = checkReady()
+    if (denied) return denied
+    const checked = parseDashboardBackup(raw)
+    if (!checked.success) return checked
+    return commit(checked.data, '已从备份恢复成员和工作区设置。')
+  }
+
+  function resetDemo(): MutationResult {
     const denied = checkReady()
     if (denied) {
       if (role === 'admin') toast(denied.error ?? '请稍后重试。', 'info')
-      return
+      return denied
     }
-    commit(createDefaultSnapshot(), '演示成员和工作空间设置已恢复默认。')
+    return commit(createDefaultSnapshot(), '演示成员和工作空间设置已恢复默认。')
   }
 
   return (
@@ -198,9 +238,13 @@ export function DashboardProvider({
         users: snapshot.users,
         settings: snapshot.settings,
         hydrated,
+        hasUnsavedSettings,
+        setHasUnsavedSettings,
         addUser,
         updateUser,
+        updateUserStatus,
         updateSettings,
+        restoreDemo,
         resetDemo,
       }}
     >

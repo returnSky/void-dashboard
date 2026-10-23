@@ -48,7 +48,8 @@ function UsersPage() {
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
   const { user } = dashboardRoute.useRouteContext()
-  const { users, hydrated, addUser, updateUser } = useDashboard()
+  const { users, hydrated, addUser, updateUser, updateUserStatus } =
+    useDashboard()
   const { toast } = useToast()
   const isAdmin = user.role === 'admin'
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -126,12 +127,10 @@ function UsersPage() {
 
   function changeStatus(member: DemoUser) {
     if (!isAdmin || !hydrated) return
-    const result = updateUser(member.id, {
-      name: member.name,
-      email: member.email,
-      role: member.role,
-      status: member.status === 'disabled' ? 'active' : 'disabled',
-    })
+    const result = updateUserStatus(
+      member.id,
+      member.status === 'disabled' ? 'active' : 'disabled',
+    )
     if (!result.success) toast(result.error ?? '状态更新失败。', 'error')
     setConfirmUser(null)
   }

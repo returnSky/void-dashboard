@@ -1,7 +1,7 @@
 import { getAppConfig } from '../config/env'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useBlocker } from '@tanstack/react-router'
 import {
   Bell,
   Building2,
@@ -11,6 +11,9 @@ import {
   UserRound,
 } from 'lucide-react'
 import { useDashboard } from '../components/DashboardProvider'
+import type { WorkspaceSettings } from '../components/DashboardProvider'
+import Dialog from '../components/Dialog'
+import DemoDataTools from '../components/DemoDataTools'
 import ThemeToggle from '../components/ThemeToggle'
 
 export const Route = createFileRoute('/_dashboard/settings')({
@@ -18,29 +21,79 @@ export const Route = createFileRoute('/_dashboard/settings')({
   component: SettingsPage,
 })
 
+function sameSettings(left: WorkspaceSettings, right: WorkspaceSettings) {
+  return (
+    left.workspaceName === right.workspaceName &&
+    left.contactEmail === right.contactEmail &&
+    left.emailNotifications === right.emailNotifications &&
+    left.weeklyDigest === right.weeklyDigest
+  )
+}
+
 function SettingsPage() {
   const { user } = Route.useRouteContext()
-  const { settings, updateSettings, hydrated } = useDashboard()
-  const [draft, setDraft] = useState(settings)
+  const { settings, updateSettings, hydrated, setHasUnsavedSettings } =
+    useDashboard()
+  const [{ draft, baseline }, setEditor] = useState({
+    draft: settings,
+    baseline: settings,
+  })
   const [error, setError] = useState('')
   const canEdit = user.role === 'admin'
 
   useEffect(() => {
-    if (hydrated) setDraft(settings)
-  }, [settings, hydrated])
+    if (!hydrated) return
+    setEditor((current) => {
+      if (
+        !canEdit ||
+        sameSettings(current.draft, current.baseline) ||
+        sameSettings(current.draft, settings)
+      ) {
+        return { draft: settings, baseline: settings }
+      }
+      return current
+    })
+  }, [settings, hydrated, canEdit, draft])
 
-  const hasChanges =
-    draft.workspaceName !== settings.workspaceName ||
-    draft.contactEmail !== settings.contactEmail ||
-    draft.emailNotifications !== settings.emailNotifications ||
-    draft.weeklyDigest !== settings.weeklyDigest
+  const hasChanges = !sameSettings(draft, baseline)
+  const hasConflict = hasChanges && !sameSettings(settings, baseline)
+  const protectDraft = hydrated && canEdit && hasChanges
+  useEffect(() => {
+    setHasUnsavedSettings(protectDraft)
+    return () => setHasUnsavedSettings(false)
+  }, [protectDraft, setHasUnsavedSettings])
+  const shouldBlockFn = useCallback(() => protectDraft, [protectDraft])
+  const blocker = useBlocker({
+    shouldBlockFn,
+    enableBeforeUnload: protectDraft,
+    disabled: !protectDraft,
+    withResolver: true,
+  })
+
+  function setDraft(next: WorkspaceSettings) {
+    setEditor((current) => ({ ...current, draft: next }))
+  }
+
+  function loadLatestSettings() {
+    setEditor({ draft: settings, baseline: settings })
+    setError('')
+  }
+
+  function saveDraft(overwrite = false) {
+    if (!hydrated || !canEdit || !hasChanges) return
+    if (hasConflict && !overwrite) {
+      setError('设置已在其他标签页更新，请先加载最新设置或明确选择覆盖。')
+      return
+    }
+    setError('')
+    const result = updateSettings(draft)
+    if (result.success) setEditor({ draft, baseline: draft })
+    else if (result.error) setError(result.error)
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!hydrated || !canEdit) return
-    setError('')
-    const result = updateSettings(draft)
-    if (result.error) setError(result.error)
+    saveDraft()
   }
 
   return (
@@ -81,6 +134,39 @@ function SettingsPage() {
             disabled={!hydrated || !canEdit}
             className="m-0 min-w-0 space-y-6 border-0 p-0"
           >
+            {hasConflict && canEdit && (
+              <section
+                role="alert"
+                className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm"
+                aria-labelledby="settings-conflict-title"
+              >
+                <h2
+                  id="settings-conflict-title"
+                  className="m-0 text-sm font-semibold"
+                >
+                  其他标签页已更新工作区设置
+                </h2>
+                <p className="mt-2 mb-4 leading-6">
+                  已保留本页未保存的修改。加载最新设置会放弃本页草稿；选择覆盖会用本页全部设置替换最新设置。
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={loadLatestSettings}
+                  >
+                    加载最新设置
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    onClick={() => saveDraft(true)}
+                  >
+                    以我的修改覆盖最新设置
+                  </button>
+                </div>
+              </section>
+            )}
             <section
               className="panel p-5 sm:p-6"
               aria-labelledby="workspace-title"
@@ -229,17 +315,14 @@ function SettingsPage() {
                   className="button button-secondary"
                   type="button"
                   disabled={!hasChanges}
-                  onClick={() => {
-                    setDraft(settings)
-                    setError('')
-                  }}
+                  onClick={loadLatestSettings}
                 >
                   取消修改
                 </button>
                 <button
                   className="button button-primary"
                   type="submit"
-                  disabled={!hasChanges}
+                  disabled={!hasChanges || hasConflict}
                 >
                   <Save size={16} aria-hidden="true" />
                   保存设置
@@ -283,8 +366,33 @@ function SettingsPage() {
             </p>
             <ThemeToggle align="start" />
           </section>
+          <DemoDataTools canEdit={canEdit} hasUnsavedChanges={hasChanges} />
         </aside>
       </div>
+      <Dialog
+        open={blocker.status === 'blocked'}
+        onClose={() => blocker.reset?.()}
+        title="离开前放弃修改？"
+        description="工作区设置还有未保存的修改，离开后本页草稿将丢失。"
+      >
+        <div className="flex flex-wrap justify-end gap-3">
+          <button
+            type="button"
+            className="button button-secondary"
+            data-dialog-autofocus
+            onClick={() => blocker.reset?.()}
+          >
+            继续编辑
+          </button>
+          <button
+            type="button"
+            className="button button-primary"
+            onClick={() => blocker.proceed?.()}
+          >
+            放弃修改并离开
+          </button>
+        </div>
+      </Dialog>
     </div>
   )
 }

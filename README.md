@@ -6,16 +6,16 @@ The Void mark combines an open ring with an inward V, using negative space and t
 
 ## Included modules
 
-| Module                         | Features                                                                                                                                                                  |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dashboard layout               | Collapsible desktop sidebar, modal mobile navigation, breadcrumbs, global user search, current environment badge, and account logout                                      |
-| Overview `/`                   | Recharts revenue and status charts, 7/30/90-day reporting periods, tooltips, CSV reports, live user statistics, and recently added members                                |
-| User management `/users`       | Search, role and status filters, sorting, pagination, empty states, add/edit forms, confirmation before disabling, reactivation, and export of all filtered results       |
-| Workspace settings `/settings` | Name, contact email, notification preferences, change detection, form validation, save/cancel actions, current account, and appearance settings                           |
-| Login `/login`                 | Server-side cookie sessions, admin and read-only demo accounts, submission and error states, password visibility, returning to the requested page after login, and logout |
-| Template guide `/about`        | Feature descriptions and guidance for connecting real services                                                                                                            |
-| Shared UI                      | Light/dark/system themes, toast notifications, loading states, retry actions, 404 pages, keyboard focus, and reduced-motion support                                       |
-| Multiple environments          | Typed public configuration, mode validation, separate build directories, and environment-specific cookies and demo data                                                   |
+| Module                         | Features                                                                                                                                                                                        |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dashboard layout               | Collapsible desktop sidebar, modal mobile navigation, breadcrumbs, global user search, current environment badge, and account logout                                                            |
+| Overview `/`                   | Recharts revenue and status charts, 7/30/90-day reporting periods, tooltips, CSV reports, live user statistics, and recently added members                                                      |
+| User management `/users`       | Search, role and status filters, sorting, pagination, empty states, add/edit forms, confirmation before disabling, reactivation, and export of all filtered results                             |
+| Workspace settings `/settings` | Name, contact email, notification preferences, validation, unsaved-change navigation protection, cross-tab conflict handling, JSON backup/restore, demo reset, account, and appearance settings |
+| Login `/login`                 | Server-side cookie sessions, admin and read-only demo accounts, submission and error states, password visibility, returning to the requested page after login, and logout                       |
+| Template guide `/about`        | Feature descriptions and guidance for connecting real services                                                                                                                                  |
+| Shared UI                      | Light/dark/system themes, toast notifications, loading states, retry actions, 404 pages, keyboard focus, and reduced-motion support                                                             |
+| Multiple environments          | Typed public configuration, mode validation, separate build directories, and environment-specific cookies and demo data                                                                         |
 
 User records and workspace settings are demo data stored in the browser, rather than in a database. Revenue is a fixed sample report, explicitly dated as of 2026/09/30; user counts and distributions update as you manage the list. Member records in user management are independent of the two login accounts. Adding a member does not create a login account, and a pending invitation does not send an email.
 
@@ -95,6 +95,14 @@ Serve UAT/PROD login over HTTPS. Cookies used by built server artifacts and UAT/
 
 Session cookies are named `void-session-dev`, `void-session-uat`, and `void-session-prod`. Demo data storage keys also include an environment suffix to prevent environments on the same domain from overwriting one another. The theme is a display preference shared on the current device. Authentication pages and session requests use `Cache-Control: private, no-store`.
 
+## Backups and editing safety
+
+Use **工作区设置 → 数据备份与恢复** to download a JSON backup of saved members and workspace settings. Backups contain member names and email addresses, so store them appropriately. Login accounts, sessions, passwords, theme preferences, and unsaved settings drafts are excluded. Read-only accounts may download backups; only administrators may restore or reset data.
+
+To restore, select a JSON backup of at most 1 MB. The application validates its version, member fields, unique IDs and email addresses, dates, settings, and member limit before showing a preview. Nothing changes until you confirm. Restoring replaces the entire member list and saved settings in the current environment; it does not merge records. The same backup may be restored into another browser or environment deliberately. Resetting demo data also requires confirmation. Save or cancel unsaved settings before either operation. A browser storage failure is reported explicitly; in that case the restored data is available only in the current page and may be lost on refresh.
+
+Settings drafts remain intact when another tab changes saved settings. A conflict notice lets you load the latest settings or explicitly save your draft over them. Leaving the page with unsaved changes prompts for confirmation, including SPA navigation and browser refresh or close where supported. Browsers control whether a native refresh/close prompt appears. Member activation and deactivation update only the latest record's status, preserving other fields changed while a confirmation dialog was open.
+
 ## Project structure and extension points
 
 ```text
@@ -102,6 +110,7 @@ src/
   config/env.ts                      # Parse and validate public environment configuration
   components/DashboardLayout.tsx     # Sidebar, top bar, search, account, and mobile navigation
   components/DashboardProvider.tsx   # Demo data adapter, role restrictions, persistence, and cross-tab sync
+  components/DemoDataTools.tsx        # JSON backup, validated restore preview, and confirmed demo reset
   components/DashboardCharts.tsx     # Recharts revenue, member status, and metric charts
   components/Select.tsx              # Shared dropdowns for reporting, filters, and member forms
   components/BrandMark.tsx           # Void portal mark shared by login and navigation
@@ -109,6 +118,7 @@ src/
   components/ToastProvider.tsx       # Action feedback
   components/ThemeToggle.tsx         # Appearance preferences, system theme, and synchronization across instances
   data/dashboard.ts                  # Member types, sample data, validation, filtering/sorting, and safe CSV
+  data/dashboard-backup.ts           # Backup file size, BOM support, and snapshot validation
   routes/__root.tsx                  # SSR HTML shell, session, theme initialization, and shared states
   routes/_dashboard.tsx              # Protected pathless layout
   routes/_dashboard.index.tsx        # Dashboard overview
@@ -145,6 +155,19 @@ To connect real reporting data, replace the overview's sample series with API or
 3. **Reports and notifications**: Replace the fixed overview revenue data with real aggregate queries. Connect demo notifications and notification preferences to a messaging or email service.
 4. **Deployment**: Choose an SSR host or deployment adapter compatible with the current TanStack Start version, and inject runtime configuration. Set up HTTPS, logging, error monitoring, and CI. Uploading only `dist/*/client` is insufficient because authentication Server Functions require a server. Use `vite preview` only for local validation. See the [TanStack Start hosting guide](https://tanstack.com/start/latest/docs/framework/react/guide/hosting) and [authentication guide](https://tanstack.com/start/latest/docs/framework/react/guide/authentication).
 
+### Remaining functionality and priorities
+
+The current project is an interactive demo template. The following work is still needed for a shared business application:
+
+| Priority | Missing capability                  | What needs to be connected                                                                                                                                                                    |
+| -------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0       | Shared, durable data                | Database and server-side member/settings read and write operations, server validation and authorization, and migration/backup strategy. `VITE_API_BASE_URL` alone does not provide these.     |
+| P0       | Real identity and account lifecycle | Identity provider, account/member mapping, invitations, password recovery, session revocation, and login rate limiting.                                                                       |
+| P1       | Concurrent editing                  | Server record versions or another conflict policy. Browser demo snapshots still use last-write-wins across simultaneous writes; settings draft warnings do not provide transaction isolation. |
+| P1       | Real reports and notifications      | Aggregate business queries, actual invitation delivery, notifications, and delivery preferences. Current revenue series and welcome notification are samples.                                 |
+| P1       | Operations and release checks       | Audit trail, error monitoring, CI checks, an SSR deployment adapter, and verification of runtime secrets and HTTPS on the chosen host.                                                        |
+| P2       | Larger member workflows             | Bulk operations and import/merge policies once a backend and product rules are defined. JSON recovery currently replaces a full snapshot; it is not a CSV member import workflow.             |
+
 ## Validation commands
 
 ```sh
@@ -154,7 +177,7 @@ pnpm test
 pnpm format
 ```
 
-`pnpm check` writes formatted files and runs ESLint with automatic fixes. Tests use a separate `vitest.config.ts` and cover domain validation, URL state, storage versions, CSV safety, Provider permissions and storage fallbacks, and environment parsing. The Start build plugin is excluded from unit tests.
+`pnpm check` writes formatted files and runs ESLint with automatic fixes. Tests use a separate `vitest.config.ts` and cover domain validation, URL state, storage versions, CSV safety, Provider permissions and storage fallbacks, backup validation and confirmation flows, settings draft conflicts and navigation protection, and environment parsing. The Start build plugin is excluded from unit tests.
 
 Keep the dependency lockfile in version control and prefer `--frozen-lockfile` when installing. TanStack routing packages are pinned to compatible versions. The explicit Router Core dependency prevents devtools from automatically selecting an incompatible peer. `pnpm-workspace.yaml` allows installation scripts only for the required native dependencies.
 

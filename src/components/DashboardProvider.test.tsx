@@ -18,7 +18,7 @@ import {
   parseDashboardSnapshot,
   serializeDashboardSnapshot,
 } from '../data/dashboard'
-import type { DemoRole } from '../data/dashboard'
+import type { DemoRole, DemoUser } from '../data/dashboard'
 
 const testStorageKey = `${DEMO_STORAGE_KEY}:DEV`
 
@@ -29,10 +29,14 @@ function Probe() {
     hydrated,
     addUser,
     updateUser,
+    updateUserStatus,
     updateSettings,
+    restoreDemo,
     resetDemo,
   } = useDashboard()
   const [result, setResult] = useState<MutationResult | null>(null)
+  const [backup, setBackup] = useState('')
+  const [pendingUser, setPendingUser] = useState<DemoUser | null>(null)
   return (
     <div>
       <output aria-label="数据恢复状态">
@@ -46,6 +50,28 @@ function Probe() {
       <output aria-label="操作结果">
         {result ? JSON.stringify(result) : ''}
       </output>
+      <output aria-label="成员详情">{JSON.stringify(users)}</output>
+      <textarea
+        aria-label="备份内容"
+        value={backup}
+        onChange={(event) => setBackup(event.currentTarget.value)}
+      />
+      <button type="button" onClick={() => setResult(restoreDemo(backup))}>
+        恢复备份
+      </button>
+      <button type="button" onClick={() => setPendingUser(users[0])}>
+        准备停用成员
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          setResult(
+            updateUserStatus(pendingUser?.id ?? users[0].id, 'disabled'),
+          )
+        }
+      >
+        停用成员
+      </button>
       <button
         type="button"
         onClick={() =>
@@ -79,7 +105,7 @@ function Probe() {
       >
         修改设置
       </button>
-      <button type="button" onClick={resetDemo}>
+      <button type="button" onClick={() => setResult(resetDemo())}>
         恢复默认
       </button>
     </div>
@@ -127,8 +153,17 @@ describe('DashboardProvider 的权限与存储边界', () => {
     window.localStorage.setItem(testStorageKey, raw)
     mount('viewer')
     await waitForHydration()
+    fireEvent.change(screen.getByLabelText('备份内容'), {
+      target: { value: serializeDashboardSnapshot(createDefaultSnapshot()) },
+    })
 
-    for (const label of ['新增成员', '编辑成员', '修改设置']) {
+    for (const label of [
+      '新增成员',
+      '编辑成员',
+      '停用成员',
+      '修改设置',
+      '恢复备份',
+    ]) {
       fireEvent.click(screen.getByRole('button', { name: label }))
       const result = JSON.parse(
         screen.getByLabelText('操作结果').textContent,
@@ -148,6 +183,126 @@ describe('DashboardProvider 的权限与存储边界', () => {
         '当前账户只有查看权限，成员和设置修改需要管理员权限。',
       ).length,
     ).toBeGreaterThan(0)
+  })
+
+  it('停用确认使用最新成员记录，保留其他标签页修改后的资料', async () => {
+    const initial = savedSnapshot()
+    window.localStorage.setItem(
+      testStorageKey,
+      serializeDashboardSnapshot(initial),
+    )
+    mount('admin')
+    await waitForHydration()
+    fireEvent.click(screen.getByRole('button', { name: '准备停用成员' }))
+
+    const latest = savedSnapshot()
+    latest.users[0] = {
+      ...latest.users[0],
+      name: '其他标签页的新姓名',
+      email: 'changed@example.com',
+      role: 'viewer',
+    }
+    const remoteRaw = serializeDashboardSnapshot(latest)
+    window.localStorage.setItem(testStorageKey, remoteRaw)
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: testStorageKey,
+          newValue: remoteRaw,
+          storageArea: window.localStorage,
+        }),
+      )
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '停用成员' }))
+    const expected = { ...latest.users[0], status: 'disabled' }
+    expect(JSON.parse(screen.getByLabelText('成员详情').textContent)).toEqual([
+      expected,
+    ])
+    expect(
+      parseDashboardSnapshot(window.localStorage.getItem(testStorageKey) ?? '')
+        ?.users,
+    ).toEqual([expected])
+  })
+
+  it('确认停用前成员已被其他标签页移除时，不重新创建旧成员', async () => {
+    window.localStorage.setItem(
+      testStorageKey,
+      serializeDashboardSnapshot(savedSnapshot()),
+    )
+    mount('admin')
+    await waitForHydration()
+    fireEvent.click(screen.getByRole('button', { name: '准备停用成员' }))
+    const latest = savedSnapshot()
+    latest.users = []
+    const remoteRaw = serializeDashboardSnapshot(latest)
+    window.localStorage.setItem(testStorageKey, remoteRaw)
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: testStorageKey,
+          newValue: remoteRaw,
+          storageArea: window.localStorage,
+        }),
+      )
+    })
+    fireEvent.click(screen.getByRole('button', { name: '停用成员' }))
+    expect(JSON.parse(screen.getByLabelText('操作结果').textContent)).toEqual({
+      success: false,
+      error: '成员不存在，请刷新列表后重试。',
+    })
+    expect(screen.getByLabelText('成员数量').textContent).toBe('0')
+    expect(window.localStorage.getItem(testStorageKey)).toBe(remoteRaw)
+  })
+
+  it('管理员恢复有效备份后更新成员、设置和本地快照', async () => {
+    mount('admin')
+    await waitForHydration()
+    const restored = savedSnapshot()
+    fireEvent.change(screen.getByLabelText('备份内容'), {
+      target: { value: `\uFEFF${serializeDashboardSnapshot(restored)}` },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '恢复备份' }))
+    expect(JSON.parse(screen.getByLabelText('成员详情').textContent)).toEqual(
+      restored.users,
+    )
+    expect(screen.getByLabelText('工作空间名称').textContent).toBe(
+      restored.settings.workspaceName,
+    )
+    expect(
+      parseDashboardSnapshot(window.localStorage.getItem(testStorageKey) ?? ''),
+    ).toEqual(restored)
+    expect(JSON.parse(screen.getByLabelText('操作结果').textContent)).toEqual({
+      success: true,
+      persisted: true,
+    })
+  })
+
+  it('无效备份不会改变已有成员、设置或本地快照', async () => {
+    const snapshot = savedSnapshot()
+    const raw = serializeDashboardSnapshot(snapshot)
+    window.localStorage.setItem(testStorageKey, raw)
+    mount('admin')
+    await waitForHydration()
+    for (const invalid of [
+      '{broken',
+      raw.replace('"version":1', '"version":999'),
+    ]) {
+      fireEvent.change(screen.getByLabelText('备份内容'), {
+        target: { value: invalid },
+      })
+      fireEvent.click(screen.getByRole('button', { name: '恢复备份' }))
+      expect(
+        JSON.parse(screen.getByLabelText('操作结果').textContent).success,
+      ).toBe(false)
+      expect(JSON.parse(screen.getByLabelText('成员详情').textContent)).toEqual(
+        snapshot.users,
+      )
+      expect(screen.getByLabelText('工作空间名称').textContent).toBe(
+        snapshot.settings.workspaceName,
+      )
+      expect(window.localStorage.getItem(testStorageKey)).toBe(raw)
+    }
   })
 
   it('恢复有效快照后，管理员的修改同时作用于页面和本地快照', async () => {
